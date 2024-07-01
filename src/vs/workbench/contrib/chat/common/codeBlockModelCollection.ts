@@ -22,6 +22,13 @@ export class CodeBlockModelCollection extends Disposable {
 		vulns: readonly IMarkdownVulnerability[];
 	}>();
 
+	/**
+	 * Max number of models to keep in memory.
+	 *
+	 * Currently always maintains the most recently created models.
+	 */
+	private readonly maxModelCount = 100;
+
 	constructor(
 		@ILanguageService private readonly languageService: ILanguageService,
 		@ITextModelService private readonly textModelService: ITextModelService
@@ -34,16 +41,16 @@ export class CodeBlockModelCollection extends Disposable {
 		this.clear();
 	}
 
-	get(sessionId: string, chat: IChatRequestViewModel | IChatResponseViewModel, codeBlockIndex: number): { model: Promise<IResolvedTextEditorModel>; vulns: readonly IMarkdownVulnerability[] } | undefined {
+	get(sessionId: string, chat: IChatRequestViewModel | IChatResponseViewModel, codeBlockIndex: number): { model: Promise<IResolvedTextEditorModel>; readonly vulns: readonly IMarkdownVulnerability[] } | undefined {
 		const uri = this.getUri(sessionId, chat, codeBlockIndex);
-		const entries = this._models.get(uri);
-		if (!entries) {
+		const entry = this._models.get(uri);
+		if (!entry) {
 			return;
 		}
-		return { model: entries.model.then(ref => ref.object), vulns: entries.vulns };
+		return { model: entry.model.then(ref => ref.object), vulns: entry.vulns };
 	}
 
-	getOrCreate(sessionId: string, chat: IChatRequestViewModel | IChatResponseViewModel, codeBlockIndex: number): { model: Promise<IResolvedTextEditorModel>; vulns: readonly IMarkdownVulnerability[] } {
+	getOrCreate(sessionId: string, chat: IChatRequestViewModel | IChatResponseViewModel, codeBlockIndex: number): { model: Promise<IResolvedTextEditorModel>; readonly vulns: readonly IMarkdownVulnerability[] } {
 		const existing = this.get(sessionId, chat, codeBlockIndex);
 		if (existing) {
 			return existing;
@@ -52,7 +59,26 @@ export class CodeBlockModelCollection extends Disposable {
 		const uri = this.getUri(sessionId, chat, codeBlockIndex);
 		const ref = this.textModelService.createModelReference(uri);
 		this._models.set(uri, { model: ref, vulns: [] });
+
+		while (this._models.size > this.maxModelCount) {
+			const first = Array.from(this._models.keys()).at(0);
+			if (!first) {
+				break;
+			}
+			this.delete(first);
+		}
+
 		return { model: ref.then(ref => ref.object), vulns: [] };
+	}
+
+	private delete(codeBlockUri: URI) {
+		const entry = this._models.get(codeBlockUri);
+		if (!entry) {
+			return;
+		}
+
+		entry.model.then(ref => ref.dispose());
+		this._models.delete(codeBlockUri);
 	}
 
 	clear(): void {
@@ -64,8 +90,8 @@ export class CodeBlockModelCollection extends Disposable {
 		const entry = this.getOrCreate(sessionId, chat, codeBlockIndex);
 
 		const extractedVulns = extractVulnerabilitiesFromText(content.text);
-		const newText = extractedVulns.newText;
-		entry.vulns = extractedVulns.vulnerabilities;
+		const newText = fixCodeText(extractedVulns.newText, content.languageId);
+		this.setVulns(sessionId, chat, codeBlockIndex, extractedVulns.vulnerabilities);
 
 		const textModel = (await entry.model).textEditorModel;
 		if (content.languageId) {
@@ -88,6 +114,14 @@ export class CodeBlockModelCollection extends Disposable {
 		} else {
 			// console.log(`Failed to optimize setText`);
 			textModel.setValue(newText);
+		}
+	}
+
+	private setVulns(sessionId: string, chat: IChatRequestViewModel | IChatResponseViewModel, codeBlockIndex: number, vulnerabilities: IMarkdownVulnerability[]) {
+		const uri = this.getUri(sessionId, chat, codeBlockIndex);
+		const entry = this._models.get(uri);
+		if (entry) {
+			entry.vulns = vulnerabilities;
 		}
 	}
 
@@ -128,4 +162,14 @@ export class CodeBlockModelCollection extends Disposable {
 			})
 		};
 	}
+}
+
+function fixCodeText(text: string, languageId: string | undefined): string {
+	if (languageId === 'php') {
+		if (!text.trim().startsWith('<')) {
+			return `<?php\n${text}`;
+		}
+	}
+
+	return text;
 }

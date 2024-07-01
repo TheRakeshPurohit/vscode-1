@@ -34,7 +34,7 @@ import { loadLocalResource, WebviewResourceResponse } from 'vs/workbench/contrib
 import { WebviewThemeDataProvider } from 'vs/workbench/contrib/webview/browser/themeing';
 import { areWebviewContentOptionsEqual, IWebview, WebviewContentOptions, WebviewExtensionDescription, WebviewInitInfo, WebviewMessageReceivedEvent, WebviewOptions } from 'vs/workbench/contrib/webview/browser/webview';
 import { WebviewFindDelegate, WebviewFindWidget } from 'vs/workbench/contrib/webview/browser/webviewFindWidget';
-import { FromWebviewMessage, KeyEvent, ToWebviewMessage } from 'vs/workbench/contrib/webview/browser/webviewMessages';
+import { FromWebviewMessage, KeyEvent, ToWebviewMessage, WebViewDragEvent } from 'vs/workbench/contrib/webview/browser/webviewMessages';
 import { decodeAuthority, webviewGenericCspSource, webviewRootResourceAuthority } from 'vs/workbench/contrib/webview/common/webview';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import { CodeWindow } from 'vs/base/browser/window';
@@ -310,6 +310,10 @@ export class WebviewElement extends Disposable implements IWebview, WebviewFindD
 			this._startBlockingIframeDragEvents();
 		}));
 
+		this._register(this.on('drag', (event) => {
+			this.handleDragEvent('drag', event);
+		}));
+
 		if (initInfo.options.enableFindWidget) {
 			this._webviewFindWidget = this._register(instantiationService.createInstance(WebviewFindWidget, this));
 		}
@@ -513,7 +517,7 @@ export class WebviewElement extends Disposable implements IWebview, WebviewFindD
 				this.element?.classList.add('ready');
 
 				if (this._state.type === WebviewState.Type.Initializing) {
-					this._state.pendingMessages.forEach(({ channel, data }) => this.doPostMessage(channel, data));
+					this._state.pendingMessages.forEach(({ channel, data, resolve }) => resolve(this.doPostMessage(channel, data)));
 				}
 				this._state = WebviewState.Ready;
 
@@ -695,6 +699,17 @@ export class WebviewElement extends Disposable implements IWebview, WebviewFindD
 		});
 		// And re-dispatch
 		this.window?.dispatchEvent(emulatedKeyboardEvent);
+	}
+
+	private handleDragEvent(type: 'drag', event: WebViewDragEvent) {
+		// Create a fake DragEvent from the data provided
+		const emulatedDragEvent = new DragEvent(type, event);
+		// Force override the target
+		Object.defineProperty(emulatedDragEvent, 'target', {
+			get: () => this.element,
+		});
+		// And re-dispatch
+		this.window?.dispatchEvent(emulatedDragEvent);
 	}
 
 	windowDidDragStart(): void {

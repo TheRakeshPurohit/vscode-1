@@ -11,7 +11,7 @@ import { IQuickPickSeparator } from 'vs/platform/quickinput/common/quickInput';
 import { localize } from 'vs/nls';
 import { ICommandService } from 'vs/platform/commands/common/commands';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
-import { IRelaxedExtensionDescription } from 'vs/platform/extensions/common/extensions';
+import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
 import { ThemeIcon } from 'vs/base/common/themables';
 import { Codicon } from 'vs/base/common/codicons';
 import { IssueSource } from 'vs/platform/issue/common/issue';
@@ -39,11 +39,31 @@ export class IssueQuickAccess extends PickerQuickAccessProvider<IPickerQuickAcce
 		// Add default items
 		const productLabel = this.productService.nameLong;
 		const marketPlaceLabel = localize("reportExtensionMarketplace", "Extension Marketplace");
-		issuePicksConst.push(
-			{ label: productLabel, ariaLabel: productLabel, accept: () => this.commandService.executeCommand('workbench.action.openIssueReporter', { issueSource: IssueSource.VSCode }) },
-			{ label: marketPlaceLabel, ariaLabel: marketPlaceLabel, accept: () => this.commandService.executeCommand('workbench.action.openIssueReporter', { issueSource: IssueSource.Marketplace }) },
-			{ type: 'separator', label: localize('extensions', "Extensions") }
-		);
+		const productFilter = matchesFuzzy(filter, productLabel, true);
+		const marketPlaceFilter = matchesFuzzy(filter, marketPlaceLabel, true);
+
+		// Add product pick if product filter matches
+		if (productFilter) {
+			issuePicksConst.push({
+				label: productLabel,
+				ariaLabel: productLabel,
+				highlights: { label: productFilter },
+				accept: () => this.commandService.executeCommand('workbench.action.openIssueReporter', { issueSource: IssueSource.VSCode })
+			});
+		}
+
+		// Add marketplace pick if marketplace filter matches
+		if (marketPlaceFilter) {
+			issuePicksConst.push({
+				label: marketPlaceLabel,
+				ariaLabel: marketPlaceLabel,
+				highlights: { label: marketPlaceFilter },
+				accept: () => this.commandService.executeCommand('workbench.action.openIssueReporter', { issueSource: IssueSource.Marketplace })
+			});
+		}
+
+		issuePicksConst.push({ type: 'separator', label: localize('extensions', "Extensions") });
+
 
 		// creates menu from contributed
 		const menu = this.menuService.createMenu(MenuId.IssueReporter, this.contextKeyService);
@@ -87,7 +107,7 @@ export class IssueQuickAccess extends PickerQuickAccessProvider<IPickerQuickAcce
 		return [...issuePicksConst, ...issuePicksParts];
 	}
 
-	private _createPick(filter: string, action?: MenuItemAction | SubmenuItemAction | undefined, extension?: IRelaxedExtensionDescription): IPickerQuickAccessItem | undefined {
+	private _createPick(filter: string, action?: MenuItemAction | SubmenuItemAction | undefined, extension?: IExtensionDescription): IPickerQuickAccessItem | undefined {
 		const buttons = [{
 			iconClass: ThemeIcon.asClassName(Codicon.info),
 			tooltip: localize('contributedIssuePage', "Open Extension Page")
